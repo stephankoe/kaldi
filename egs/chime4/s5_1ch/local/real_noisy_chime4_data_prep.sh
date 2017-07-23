@@ -26,7 +26,7 @@ fi
 
 echo "$0 $@"  # Print the command line for logging
 
-audio_dir=$1/data/audio/16kHz/isolated
+audio_dir=$1/data/audio/16kHz/isolated_6ch_track_original
 trans_dir=$1/data/transcriptions
 
 echo "extract 5th channel (CH5.wav, the center bottom edge in the front of the tablet) for noisy data"
@@ -53,10 +53,10 @@ fi
 
 cd $dir
 
-find $audio_dir -name '*CH5.wav' | grep 'tr05_bus_real\|tr05_caf_real\|tr05_ped_real\|tr05_str_real' | sort -u > tr05_real_noisy.flist
-find $audio_dir -name '*CH5.wav' | grep 'dt05_bus_real\|dt05_caf_real\|dt05_ped_real\|dt05_str_real' | sort -u > dt05_real_noisy.flist
+find -L $audio_dir -name '*CH5.wav' | grep 'tr05_bus_real\|tr05_caf_real\|tr05_ped_real\|tr05_str_real' | sort -u > tr05_real_noisy.flist
+find -L $audio_dir -name '*CH5.wav' | grep 'dt05_bus_real\|dt05_caf_real\|dt05_ped_real\|dt05_str_real' | sort -u > dt05_real_noisy.flist
 if $eval_flag; then
-find $audio_dir -name '*CH5.wav' | grep 'et05_bus_real\|et05_caf_real\|et05_ped_real\|et05_str_real' | sort -u > et05_real_noisy.flist
+find -L $audio_dir -name '*CH5.wav' | grep 'et05_bus_real\|et05_caf_real\|et05_ped_real\|et05_str_real' | sort -u > et05_real_noisy.flist
 fi
 
 # make a dot format from json annotation files

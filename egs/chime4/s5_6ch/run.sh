@@ -27,7 +27,7 @@ set -o pipefail
 # If you use scripts distributed in the CHiME4 package,
 chime4_data=`pwd`/../..
 # Otherwise, please specify it, e.g.,
-chime4_data=/db/laputa1/data/processed/public/CHiME4
+chime4_data=/u/corpora/speech/CHiME4
 if [ ! -d $chime4_data ]; then
   echo "$chime4_data does not exist. Please specify chime4 data root correctly" && exit 1
 fi
@@ -54,7 +54,7 @@ fi
 enhancement_method=beamformit_5mics
 enhancement_data=`pwd`/enhan/$enhancement_method
 if [ $stage -le 1 ]; then
-  local/run_beamform_6ch_track.sh --cmd "$train_cmd" --nj 20 $chime4_data/data/audio/16kHz/isolated_6ch_track $enhancement_data
+#  local/run_beamform_6ch_track.sh --cmd "$train_cmd" --nj 20 $chime4_data/data/audio/16kHz/isolated_6ch_track $enhancement_data
 fi
 
 # GMM based ASR experiment without "retraining"
