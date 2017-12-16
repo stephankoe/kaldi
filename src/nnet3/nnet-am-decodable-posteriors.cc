@@ -23,8 +23,8 @@ namespace kaldi {
 namespace nnet3 {
 
 DecodableAmPosteriors::DecodableAmPosteriors(
-    const TransitionModel &trans_model,
-    const MatrixBase<BaseFloat> &posteriors):
+    const MatrixBase<BaseFloat> &posteriors,
+    const TransitionModel &trans_model):
     posteriors_copy_(NULL),
     trans_model_(trans_model) {
   posteriors_copy_ = new Matrix<BaseFloat>(posteriors);
