@@ -23,6 +23,7 @@
 #include "itf/options-itf.h"
 #include "decoder/lattice-faster-decoder.h"
 #include "decoder/lattice-simple-decoder.h"
+#include "lattice-biglm-faster-decoder.h"
 
 // This header contains declarations from various convenience functions that are called
 // from binary-level programs such as gmm-decode-faster.cc, gmm-align-compiled.cc, and
@@ -173,6 +174,28 @@ class DecodeUtteranceLatticeFasterClass {
   CompactLattice *clat_; // Stored output, if determinize_ == true.
   Lattice *lat_; // Stored output, if determinize_ == false.
 };
+
+
+/// This function DecodeUtteranceLatticeBigLmFaster is used in several decoders, and
+/// we have moved it here.  Note: this is really "binary-level" code as it
+/// involves table readers and writers; we've just put it here as there is no
+/// other obvious place to put it.  If determinize == false, it writes to
+/// lattice_writer, else to compact_lattice_writer.  The writers for
+/// alignments and words will only be written to if they are open.
+bool DecodeUtteranceLatticeBigLmFaster(LatticeBiglmFasterDecoder &decoder, // not const but is really an input.
+                                       DecodableInterface &decodable, // not const but is really an input.
+                                       const TransitionModel &trans_model,
+                                       const fst::SymbolTable *word_syms,
+                                       std::string utt,
+                                       double acoustic_scale,
+                                       bool determinize,
+                                       bool allow_partial,
+                                       Int32VectorWriter *alignment_writer,
+                                       Int32VectorWriter *words_writer,
+                                       CompactLatticeWriter *compact_lattice_writer,
+                                       LatticeWriter *lattice_writer,
+                                       double *like_ptr);  // puts utterance's like in like_ptr on success.
+
 
 // This function DecodeUtteranceLatticeSimple is used in several decoders, and
 // we have moved it here.  Note: this is really "binary-level" code as it

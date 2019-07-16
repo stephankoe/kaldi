@@ -1,6 +1,6 @@
-// gmmbin/gmm-latgen-biglm-faster.cc
+// bin/latgen-faster-mapped.cc
 
-// Copyright 2009-2011  Microsoft Corporation
+// Copyright 2009-2012  Microsoft Corporation, Karel Vesely
 //                2013  Johns Hopkins University (author: Daniel Povey)
 //                2014  Guoguo Chen
 
@@ -20,15 +20,14 @@
 // limitations under the License.
 
 
+#include <decoder/lattice-biglm-faster-decoder.h>
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
-#include "gmm/am-diag-gmm.h"
 #include "tree/context-dep.h"
 #include "hmm/transition-model.h"
 #include "fstext/fstext-lib.h"
 #include "decoder/decoder-wrappers.h"
-#include "decoder/lattice-biglm-faster-decoder.h"
-#include "gmm/decodable-am-diag-gmm.h"
+#include "decoder/decodable-matrix.h"
 #include "base/timer.h"
 
 
@@ -37,38 +36,37 @@ int main(int argc, char *argv[]) {
     using namespace kaldi;
     typedef kaldi::int32 int32;
     using fst::SymbolTable;
-    using fst::VectorFst;
     using fst::Fst;
     using fst::StdArc;
-    using fst::ReadFstKaldi;
+    using fst::VectorFst;
 
     const char *usage =
-        "Generate lattices using GMM-based model.\n"
+        "Generate lattices using the BigLM decoder, reading log-likelihoods as matrices\n"
+        " (model is needed only for the integer mappings in its transition-model)\n"
         "User supplies LM used to generate decoding graph, and desired LM;\n"
         "this decoder applies the difference during decoding\n"
-        "Usage: gmm-latgen-biglm-faster [options] model-in (fst-in|fsts-rspecifier) "
-        "oldlm-fst-in newlm-fst-in features-rspecifier"
-        " lattice-wspecifier [ words-wspecifier [alignments-wspecifier] ]\n";
+        "Usage: latgen-biglm-faster-mapped [options] trans-model-in (fst-in|fsts-rspecifier) oldlm-fst-in newlm-fst-in "
+        "loglikes-rspecifier lattice-wspecifier [ words-wspecifier [alignments-wspecifier] ]\n";
     ParseOptions po(usage);
     Timer timer;
     bool allow_partial = false;
     BaseFloat acoustic_scale = 0.1;
-    LatticeBiglmFasterDecoderConfig config;
-    
+    LatticeFasterDecoderConfig config;
+
     std::string word_syms_filename;
     config.Register(&po);
     po.Register("acoustic-scale", &acoustic_scale, "Scaling factor for acoustic likelihoods");
 
     po.Register("word-symbol-table", &word_syms_filename, "Symbol table for words [for debug output]");
     po.Register("allow-partial", &allow_partial, "If true, produce output even if end state was not reached.");
-    
+
     po.Read(argc, argv);
 
-    if (po.NumArgs() < 6 || po.NumArgs() > 8) {
+    if (po.NumArgs() < 4 || po.NumArgs() > 6) {
       po.PrintUsage();
       exit(1);
     }
-    
+
     std::string model_in_filename = po.GetArg(1),
         fst_in_str = po.GetArg(2),
         old_lm_fst_rxfilename = po.GetArg(3),
@@ -77,20 +75,14 @@ int main(int argc, char *argv[]) {
         lattice_wspecifier = po.GetArg(6),
         words_wspecifier = po.GetOptArg(7),
         alignment_wspecifier = po.GetOptArg(8);
-    
+
     TransitionModel trans_model;
-    AmDiagGmm am_gmm;
-    {
-      bool binary;
-      Input ki(model_in_filename, &binary);
-      trans_model.Read(ki.Stream(), binary);
-      am_gmm.Read(ki.Stream(), binary);
-    }
-    
+    ReadKaldiObject(model_in_filename, &trans_model);
+
     VectorFst<StdArc> *old_lm_fst = fst::CastOrConvertToVectorFst(
         fst::ReadFstKaldiGeneric(old_lm_fst_rxfilename));
     ApplyProbabilityScale(-1.0, old_lm_fst); // Negate old LM probs...
-    
+
     VectorFst<StdArc> *new_lm_fst = fst::CastOrConvertToVectorFst(
         fst::ReadFstKaldiGeneric(new_lm_fst_rxfilename));
 
@@ -113,7 +105,7 @@ int main(int argc, char *argv[]) {
     Int32VectorWriter alignment_writer(alignment_wspecifier);
 
     fst::SymbolTable *word_syms = NULL;
-    if (word_syms_filename != "") 
+    if (word_syms_filename != "")
       if (!(word_syms = fst::SymbolTable::ReadText(word_syms_filename)))
         KALDI_ERR << "Could not read symbol table from file "
                    << word_syms_filename;
@@ -122,37 +114,35 @@ int main(int argc, char *argv[]) {
     kaldi::int64 frame_count = 0;
     int num_success = 0, num_fail = 0;
 
-
     if (ClassifyRspecifier(fst_in_str, NULL, NULL) == kNoRspecifier) {
-      SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
+      SequentialBaseFloatMatrixReader loglike_reader(feature_rspecifier);
       // Input FST is just one FST, not a table of FSTs.
       Fst<StdArc> *decode_fst = fst::ReadFstKaldiGeneric(fst_in_str);
+      timer.Reset();
 
       {
         LatticeBiglmFasterDecoder decoder(*decode_fst, config, &cache_dfst);
-    
-        for (; !feature_reader.Done(); feature_reader.Next()) {
-          std::string utt = feature_reader.Key();
-          Matrix<BaseFloat> features (feature_reader.Value());
-          feature_reader.FreeCurrent();
-          if (features.NumRows() == 0) {
+
+        for (; !loglike_reader.Done(); loglike_reader.Next()) {
+          std::string utt = loglike_reader.Key();
+          Matrix<BaseFloat> loglikes (loglike_reader.Value());
+          loglike_reader.FreeCurrent();
+          if (loglikes.NumRows() == 0) {
             KALDI_WARN << "Zero-length utterance: " << utt;
             num_fail++;
             continue;
           }
-      
-          DecodableAmDiagGmmScaled gmm_decodable(am_gmm, trans_model, features,
-                                                 acoustic_scale);
 
+          DecodableMatrixScaledMapped decodable(trans_model, loglikes, acoustic_scale);
 
           double like;
-          if (DecodeUtteranceLatticeBigLmFaster(decoder, gmm_decodable, trans_model, word_syms,
-                                                utt, acoustic_scale, determinize, allow_partial,
-                                                &alignment_writer, &words_writer,
-                                                &compact_lattice_writer, &lattice_writer,
-                                                &like)) {
+          if (DecodeUtteranceLatticeBigLmFaster(
+                  decoder, decodable, trans_model, word_syms, utt,
+                  acoustic_scale, determinize, allow_partial, &alignment_writer,
+                  &words_writer, &compact_lattice_writer, &lattice_writer,
+                  &like)) {
             tot_like += like;
-            frame_count += features.NumRows();
+            frame_count += loglikes.NumRows();
             num_success++;
           } else num_fail++;
         }
@@ -160,38 +150,37 @@ int main(int argc, char *argv[]) {
       delete decode_fst; // delete this only after decoder goes out of scope.
     } else { // We have different FSTs for different utterances.
       SequentialTableReader<fst::VectorFstHolder> fst_reader(fst_in_str);
-      RandomAccessBaseFloatMatrixReader feature_reader(feature_rspecifier);          
+      RandomAccessBaseFloatMatrixReader loglike_reader(feature_rspecifier);
       for (; !fst_reader.Done(); fst_reader.Next()) {
         std::string utt = fst_reader.Key();
-        if (!feature_reader.HasKey(utt)) {
+        if (!loglike_reader.HasKey(utt)) {
           KALDI_WARN << "Not decoding utterance " << utt
-                     << " because no features available.";
+                     << " because no loglikes available.";
           num_fail++;
           continue;
         }
-        const Matrix<BaseFloat> &features = feature_reader.Value(utt);
-        if (features.NumRows() == 0) {
+        const Matrix<BaseFloat> &loglikes = loglike_reader.Value(utt);
+        if (loglikes.NumRows() == 0) {
           KALDI_WARN << "Zero-length utterance: " << utt;
           num_fail++;
           continue;
         }
         LatticeBiglmFasterDecoder decoder(fst_reader.Value(), config,
                                           &cache_dfst);
-        DecodableAmDiagGmmScaled gmm_decodable(am_gmm, trans_model, features,
-                                               acoustic_scale);
+
+        DecodableMatrixScaledMapped decodable(trans_model, loglikes, acoustic_scale);
         double like;
-        if (DecodeUtteranceLatticeBigLmFaster(decoder, gmm_decodable, trans_model, word_syms, utt,
-                                              acoustic_scale, determinize, allow_partial,
-                                              &alignment_writer, &words_writer,
-                                              &compact_lattice_writer, &lattice_writer,
-                                              &like)) {
+        if (DecodeUtteranceLatticeBigLmFaster(
+                decoder, decodable, trans_model, word_syms, utt, acoustic_scale,
+                determinize, allow_partial, &alignment_writer, &words_writer,
+                &compact_lattice_writer, &lattice_writer, &like)) {
           tot_like += like;
-          frame_count += features.NumRows();
+          frame_count += loglikes.NumRows();
           num_success++;
         } else num_fail++;
       }
     }
-      
+
     double elapsed = timer.Elapsed();
     KALDI_LOG << "Time taken "<< elapsed
               << "s: real-time factor assuming 100 frames/sec is "
