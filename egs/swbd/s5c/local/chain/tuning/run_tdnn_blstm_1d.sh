@@ -25,7 +25,6 @@ decode_iter=
 decode_dir_affix=
 
 # training options
-leftmost_questions_truncate=-1
 chunk_width=140,100,160
 chunk_left_context=40
 chunk_right_context=40
@@ -34,7 +33,6 @@ self_repair_scale=0.00001
 label_delay=0
 dropout_schedule='0,0@0.20,0.1@0.50,0'
 # decode options
-frames_per_chunk=
 remove_egs=false
 common_egs_dir=
 
@@ -105,7 +103,6 @@ fi
 if [ $stage -le 11 ]; then
   # Build a tree using our new topology.
   steps/nnet3/chain/build_tree.sh --frame-subsampling-factor 3 \
-      --leftmost-questions-truncate $leftmost_questions_truncate \
       --context-opts "--context-width=2 --central-position=1" \
       --cmd "$train_cmd" 7000 data/$train_set $lang $ali_dir $treedir
 fi
@@ -115,7 +112,7 @@ if [ $stage -le 12 ]; then
 
   num_targets=$(tree-info $treedir/tree |grep num-pdfs|awk '{print $2}')
   [ -z $num_targets ] && { echo "$0: error getting num-targets"; exit 1; }
-  learning_rate_factor=$(echo "print 0.5/$xent_regularize" | python)
+  learning_rate_factor=$(echo "print (0.5/$xent_regularize)" | python)
 
   lstm_opts="decay-time=20 dropout-proportion=0.0"
 
@@ -218,6 +215,7 @@ if [ $stage -le 15 ]; then
   if [ ! -z $decode_iter ]; then
     iter_opts=" --iter $decode_iter "
   fi
+  frames_per_chunk=$(echo $chunk_width | cut -d, -f1)
   for decode_set in train_dev eval2000; do
       (
       steps/nnet3/decode.sh --acwt 1.0 --post-decode-acwt 10.0 \

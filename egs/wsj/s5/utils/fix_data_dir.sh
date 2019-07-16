@@ -6,6 +6,13 @@
 # It puts the original contents of data-dir into
 # data-dir/.backup
 
+cmd="$@"
+
+utt_extra_files=
+spk_extra_files=
+
+. utils/parse_options.sh
+
 if [ $# != 1 ]; then
   echo "Usage: utils/data/fix_data_dir.sh <data-dir>"
   echo "e.g.: utils/data/fix_data_dir.sh data/train"
@@ -16,6 +23,12 @@ if [ $# != 1 ]; then
 fi
 
 data=$1
+
+if [ -f $data/images.scp ]; then
+  image/fix_data_dir.sh $cmd
+  exit $?
+fi
+
 mkdir -p $data/.backup
 
 [ ! -d $data ] && echo "$0: no such directory $data" && exit 1;
@@ -41,7 +54,7 @@ function check_sorted {
 }
 
 for x in utt2spk spk2utt feats.scp text segments wav.scp cmvn.scp vad.scp \
-    reco2file_and_channel spk2gender utt2lang utt2uniq utt2dur utt2num_frames; do
+    reco2file_and_channel spk2gender utt2lang utt2uniq utt2dur reco2dur utt2num_frames; do
   if [ -f $data/$x ]; then
     cp $data/$x $data/.backup/$x
     check_sorted $data/$x
@@ -92,6 +105,7 @@ function filter_recordings {
 
     filter_file $tmpdir/recordings $data/wav.scp
     [ -f $data/reco2file_and_channel ] && filter_file $tmpdir/recordings $data/reco2file_and_channel
+    [ -f $data/reco2dur ] && filter_file $tmpdir/recordings $data/reco2dur
     true
   fi
 }
@@ -111,7 +125,7 @@ function filter_speakers {
   filter_file $tmpdir/speakers $data/spk2utt
   utils/spk2utt_to_utt2spk.pl $data/spk2utt > $data/utt2spk
 
-  for s in cmvn.scp spk2gender; do
+  for s in cmvn.scp spk2gender $spk_extra_files; do
     f=$data/$s
     if [ -f $f ]; then
       filter_file $tmpdir/speakers $f
@@ -138,13 +152,25 @@ function filter_utts {
   fi
 
   maybe_wav=
-  [ ! -f $data/segments ] && maybe_wav=wav.scp  # wav indexed by utts only if segments does not exist.
-  for x in feats.scp text segments utt2lang $maybe_wav; do
+  maybe_reco2dur=
+  [ ! -f $data/segments ] && maybe_wav=wav.scp # wav indexed by utts only if segments does not exist.
+  [ -s $data/reco2dur ] && [ ! -f $data/segments ] && maybe_reco2dur=reco2dur # reco2dur indexed by utts
+
+  maybe_utt2dur=
+  if [ -f $data/utt2dur ]; then
+    cat $data/utt2dur | \
+      awk '{ if (NF == 2 && $2 > 0) { print }}' > $data/utt2dur.ok || exit 1
+    maybe_utt2dur=utt2dur.ok
+  fi
+
+  for x in feats.scp text segments utt2lang $maybe_wav $maybe_utt2dur; do
     if [ -f $data/$x ]; then
       utils/filter_scp.pl $data/$x $tmpdir/utts > $tmpdir/utts.tmp
       mv $tmpdir/utts.tmp $tmpdir/utts
     fi
   done
+  rm $data/utt2dur.ok 2>/dev/null || true
+
   [ ! -s $tmpdir/utts ] && echo "fix_data_dir.sh: no utterances remained: not proceeding further." && \
     rm $tmpdir/utts && exit 1;
 
@@ -159,7 +185,7 @@ function filter_utts {
     fi
   fi
 
-  for x in utt2spk utt2uniq feats.scp vad.scp text segments utt2lang utt2dur utt2num_frames $maybe_wav; do
+  for x in utt2spk utt2uniq feats.scp vad.scp text segments utt2lang utt2dur utt2num_frames $maybe_wav $maybe_reco2dur $utt_extra_files; do
     if [ -f $data/$x ]; then
       cp $data/$x $data/.backup/$x
       if ! cmp -s $data/$x <( utils/filter_scp.pl $tmpdir/utts $data/$x ) ; then

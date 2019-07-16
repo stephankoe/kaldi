@@ -16,7 +16,6 @@ decode_iter=
 num_epochs=4
 initial_effective_lrate=0.001
 final_effective_lrate=0.0001
-leftmost_questions_truncate=-1
 max_param_change=2.0
 final_layer_normalize_target=0.5
 num_jobs_initial=2
@@ -83,7 +82,6 @@ if [ $stage -le 9 ]; then
   # Build a tree using our new topology. This is the critically different
   # step compared with other recipes.
   steps/nnet3/chain/build_tree.sh --frame-subsampling-factor 3 \
-      --leftmost-questions-truncate $leftmost_questions_truncate \
       --context-opts "--context-width=2 --central-position=1" \
       --cmd "$train_cmd" 5000 data/$train_set $lang $ali_dir $treedir
 fi
@@ -92,7 +90,7 @@ if [ $stage -le 10 ]; then
   echo "$0: creating neural net configs using the xconfig parser";
 
   num_targets=$(tree-info $treedir/tree |grep num-pdfs|awk '{print $2}')
-  learning_rate_factor=$(echo "print 0.5/$xent_regularize" | python)
+  learning_rate_factor=$(echo "print (0.5/$xent_regularize)" | python)
 
   mkdir -p $dir/configs
   cat <<EOF > $dir/configs/network.xconfig

@@ -35,7 +35,10 @@ int main(int argc, char *argv[]) {
         "sequence.  In the 3-argument form, we read it from the\n"
         "<1best-rspecifier> input; otherwise it is the 1-best of the lattice.\n"
         "Then, if --decode-mbr=true, we iteratively refine the hypothesis\n"
-        "using Minimum Bayes Risk decoding.  If you don't need confidences,\n"
+        "using Minimum Bayes Risk decoding. (Note that the default value of decode_mbr\n"
+        "is true. If you provide <1best-rspecifier> from MAP decoding, the output ctm\n"
+        "from MBR decoding may be mismatched with the provided 1best hypothesis (the\n"
+        "starting point of optimization). If you don't need confidences,\n"
         "you can do lattice-1best and pipe to nbest-to-ctm. The ctm this\n"
         "program produces will be relative to the utterance-id; a standard\n"
         "ctm relative to the filename can be obtained using\n"
@@ -52,7 +55,7 @@ int main(int argc, char *argv[]) {
         "   or: lattice-to-ctm-conf --acoustic-scale=0.1 --decode-mbr=false\\\n"
         "                                      ark:1.lats ark:1.1best 1.ctm\n"
         "See also: lattice-mbr-decode, nbest-to-ctm, lattice-arc-post,\n"
-        " steps/get_ctm.sh, steps/get_train_ctm.sh and utils/convert_ctm.sh.\n";
+        " steps/get_ctm.sh, steps/get_train_ctm.sh and utils/convert_ctm.pl.\n";
 
     ParseOptions po(usage);
     BaseFloat acoustic_scale = 1.0, inv_acoustic_scale = 1.0, lm_scale = 1.0;

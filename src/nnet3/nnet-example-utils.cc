@@ -66,9 +66,9 @@ static void GetIoSizes(const std::vector<NnetExample> &src,
       KALDI_ASSERT(*names_iter == io.name);
       int32 i = names_iter - names_begin;
       int32 this_dim = io.features.NumCols();
-      if (dims[i] == -1)
+      if (dims[i] == -1) {
         dims[i] = this_dim;
-      else if(dims[i] != this_dim) {
+      } else if (dims[i] != this_dim) {
         KALDI_ERR << "Merging examples with inconsistent feature dims: "
                   << dims[i] << " vs. " << this_dim << " for '"
                   << io.name << "'.";
@@ -90,9 +90,15 @@ static void MergeIo(const std::vector<NnetExample> &src,
                     const std::vector<int32> &sizes,
                     bool compress,
                     NnetExample *merged_eg) {
+  // The total number of Indexes we have across all examples.
   int32 num_feats = names.size();
+
   std::vector<int32> cur_size(num_feats, 0);
+
+  // The features in the different NnetIo in the Indexes across all examples
   std::vector<std::vector<GeneralMatrix const*> > output_lists(num_feats);
+
+  // Initialize the merged_eg
   merged_eg->io.clear();
   merged_eg->io.resize(num_feats);
   for (int32 f = 0; f < num_feats; f++) {
@@ -105,20 +111,26 @@ static void MergeIo(const std::vector<NnetExample> &src,
 
   std::vector<std::string>::const_iterator names_begin = names.begin(),
                                              names_end = names.end();
-  std::vector<NnetExample>::const_iterator iter = src.begin(), end = src.end();
-  for (int32 n = 0; iter != end; ++iter,++n) {
-    std::vector<NnetIo>::const_iterator iter2 = iter->io.begin(),
-                                         end2 = iter->io.end();
-    for (; iter2 != end2; ++iter2) {
-      const NnetIo &io = *iter2;
+  std::vector<NnetExample>::const_iterator eg_iter = src.begin(),
+    eg_end = src.end();
+  for (int32 n = 0; eg_iter != eg_end; ++eg_iter, ++n) {
+    std::vector<NnetIo>::const_iterator io_iter = eg_iter->io.begin(),
+      io_end = eg_iter->io.end();
+    for (; io_iter != io_end; ++io_iter) {
+      const NnetIo &io = *io_iter;
       std::vector<std::string>::const_iterator names_iter =
           std::lower_bound(names_begin, names_end, io.name);
       KALDI_ASSERT(*names_iter == io.name);
+
       int32 f = names_iter - names_begin;
-      int32 this_size = io.indexes.size(),
-          &this_offset = cur_size[f];
+      int32 this_size = io.indexes.size();
+      int32 &this_offset = cur_size[f];
       KALDI_ASSERT(this_size + this_offset <= sizes[f]);
+
+      // Add f'th Io's features
       output_lists[f].push_back(&(io.features));
+
+      // Work on the Indexes for the f^th Io in merged_eg
       NnetIo &output_io = merged_eg->io[f];
       std::copy(io.indexes.begin(), io.indexes.end(),
                 output_io.indexes.begin() + this_offset);
@@ -202,8 +214,8 @@ void GetComputationRequest(const Nnet &nnet,
     const NnetIo &io = eg.io[i];
     const std::string &name = io.name;
     int32 node_index = nnet.GetNodeIndex(name);
-    if (node_index == -1 &&
-        !nnet.IsInputNode(node_index) && !nnet.IsOutputNode(node_index))
+    if (node_index == -1 ||
+        (!nnet.IsInputNode(node_index) && !nnet.IsOutputNode(node_index)))
       KALDI_ERR << "Nnet example has input or output named '" << name
                 << "', but no such input or output node is in the network.";
 
@@ -288,6 +300,9 @@ void RoundUpNumFrames(int32 frame_subsampling_factor,
 }
 
 void ExampleGenerationConfig::ComputeDerived() {
+  if (num_frames_str == "-1") {
+    return;
+  }
   if (!SplitStringToIntegers(num_frames_str, ",", false, &num_frames) ||
       num_frames.empty()) {
     KALDI_ERR << "Invalid option (expected comma-separated list of integers): "
@@ -329,11 +344,13 @@ UtteranceSplitter::UtteranceSplitter(const ExampleGenerationConfig &config):
     total_num_utterances_(0), total_input_frames_(0),
     total_frames_overlap_(0), total_num_chunks_(0),
     total_frames_in_chunks_(0) {
-  if (config.num_frames.empty()) {
-    KALDI_ERR << "You need to call ComputeDerived() on the "
+  if (config.num_frames_str != "-1") {
+    if (config.num_frames.empty()) {
+      KALDI_ERR << "You need to call ComputeDerived() on the "
                  "ExampleGenerationConfig().";
+    }
+   InitSplitForLength();
   }
-  InitSplitForLength();
 }
 
 UtteranceSplitter::~UtteranceSplitter() {
@@ -365,6 +382,7 @@ UtteranceSplitter::~UtteranceSplitter() {
     KALDI_LOG << "Output frames are distributed among chunk-sizes as follows: "
               << os.str();
   }
+
 }
 
 float UtteranceSplitter::DefaultDurationOfSplit(
@@ -534,10 +552,12 @@ void UtteranceSplitter::InitSplitForLength() {
 
 bool UtteranceSplitter::LengthsMatch(const std::string &utt,
                                      int32 utterance_length,
-                                     int32 supervision_length) const {
+                                     int32 supervision_length,
+                                     int32 length_tolerance) const {
   int32 sf = config_.frame_subsampling_factor,
       expected_supervision_length = (utterance_length + sf - 1) / sf;
-  if (supervision_length == expected_supervision_length) {
+  if (std::abs(supervision_length - expected_supervision_length) 
+      <= length_tolerance) {
     return true;
   } else {
     if (sf == 1) {
@@ -802,23 +822,35 @@ void UtteranceSplitter::GetGapSizes(int32 utterance_length,
 void UtteranceSplitter::GetChunksForUtterance(
     int32 utterance_length,
     std::vector<ChunkTimeInfo> *chunk_info) {
-  std::vector<int32> chunk_sizes;
-  GetChunkSizesForUtterance(utterance_length, &chunk_sizes);
-  std::vector<int32> gaps(chunk_sizes.size());
-  GetGapSizes(utterance_length, true, chunk_sizes, &gaps);
-  int32 num_chunks = chunk_sizes.size();
-  chunk_info->resize(num_chunks);
   int32 t = 0;
-  for (int32 i = 0; i < num_chunks; i++) {
-    t += gaps[i];
-    ChunkTimeInfo &info = (*chunk_info)[i];
-    info.first_frame = t;
-    info.num_frames = chunk_sizes[i];
-    info.left_context = (i == 0 && config_.left_context_initial >= 0 ?
-                         config_.left_context_initial : config_.left_context);
-    info.right_context = (i == num_chunks - 1 && config_.right_context_final >= 0 ?
-                          config_.right_context_final : config_.right_context);
-    t += chunk_sizes[i];
+  if (config_.num_frames_str == "-1" ) {
+    ChunkTimeInfo *info;
+    info = new ChunkTimeInfo;
+    info->first_frame = 0;
+    info->num_frames = utterance_length;
+    info->left_context = (config_.left_context_initial >= 0 ?
+                          config_.left_context_initial : config_.left_context);
+    info->right_context = (config_.right_context_final >= 0 ?
+                           config_.right_context_final : config_.right_context);
+    (*chunk_info).push_back(*info);
+  } else {
+    std::vector<int32> chunk_sizes;
+    GetChunkSizesForUtterance(utterance_length, &chunk_sizes);
+    std::vector<int32> gaps(chunk_sizes.size());
+    GetGapSizes(utterance_length, true, chunk_sizes, &gaps);
+    int32 num_chunks = chunk_sizes.size();
+    chunk_info->resize(num_chunks);
+    for (int32 i = 0; i < num_chunks; i++) {
+      t += gaps[i];
+      ChunkTimeInfo &info = (*chunk_info)[i];
+      info.first_frame = t;
+      info.num_frames = chunk_sizes[i];
+      info.left_context = (i == 0 && config_.left_context_initial >= 0 ?
+                           config_.left_context_initial : config_.left_context);
+      info.right_context = (i == num_chunks - 1 && config_.right_context_final >= 0 ?
+                            config_.right_context_final : config_.right_context);
+      t += chunk_sizes[i];
+    }
   }
   SetOutputWeights(utterance_length, chunk_info);
   AccStatsForUtterance(utterance_length, *chunk_info);
@@ -1250,7 +1282,6 @@ void ExampleMerger::Finish() {
   }
   stats_.PrintStats();
 }
-
 
 } // namespace nnet3
 } // namespace kaldi
